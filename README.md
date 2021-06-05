@@ -21,5 +21,6 @@ A simple lua-based dashboard for the OpenTX QX7 Transmitters (Might work with XL
 * ~~Add beeper graphic~~ (Done)
 * Add user configurable batt mAh
 * Add user configurable min batt voltage
+* Improve readings based on logical switches
 * Improve beeper graphic
 * Add help screen
