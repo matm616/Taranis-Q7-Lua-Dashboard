@@ -1,35 +1,31 @@
 ----------------------------------------------------------
--- Written by Farley Farley
--- farley <at> neonsurge __dot__ com
+-- Edit by Mateusz Matczak - https://github.com/matm616/Taranis-Q7-Lua-Dashboard
+-- Original written by Farley Farley - farley neonsurge dot com
 -- From: https://github.com/AndrewFarley/Taranis-XLite-Q7-Lua-Dashboard
--- Please feel free to submit issues, feedback, etc.
 ----------------------------------------------------------
 
 
 ------- GLOBALS -------
--- The model name when it can't detect a model name from the handset
 local modelName = "Unknown"
--- I'm using 8 NiMH Batteries in my QX7, which is 1.1v low, and ~1.325v high
-local lowVoltage = 8.8
-local currentVoltage = 10.6
-local highVoltage = 10.6
--- For an X-Lite you will need...
 local lowVoltage = 6.6
-local currentVoltage = 8.4
-local highVoltage = 8.4
--- For our timer tracking
-local timerLeft = 0
-local maxTimerValue = 0
--- For armed drawing
+local currentVoltage = 7.8
+local highVoltage = 7.8
 local armed = 0
--- For mode drawing
 local mode = 0
--- Animation increment
-local animationIncrement = 0
--- is off trying to go on...
+local mode2 = 0
 local isArmed = 0
--- Our global to get our current rssi
 local rssi = 0
+local maxCurrent = 0
+local previousMAH = 0
+local drawnMAH = 0
+local beeper = 0
+local beeping = 0
+local animationIncrement = 0
+-- Switches
+local armSwitch = "sf"
+local modeSwitch = "sa"
+local modeSwitch2 = "sb"
+local beeperSwitch = "sh"
 -- For debugging / development
 local lastMessage = "None"
 local lastNumberMessage = "0"
@@ -48,40 +44,85 @@ local function convertVoltageToPercentage(voltage)
   return curVolPercent
 end
 
--- A little animation / frame counter to help us with various animations
 local function setAnimationIncrement()
   animationIncrement = math.fmod(math.ceil(math.fmod(getTime() / 100, 2) * 8), 4)
 end
 
-local function drawPropellor(start_x, start_y, invert)
-  local animationIncrementLocal = animationIncrement
-  if invert == true then
-    animationIncrementLocal = (animationIncrementLocal - 3) * -1
-    animationIncrementLocal = animationIncrementLocal + 3
-    if animationIncrementLocal > 3 then
-      animationIncrementLocal = animationIncrementLocal - 4
+local function resetValues()
+  maxCurrent = 0
+  previousMAH = 0
+end
+-- written by Sacre100
+-- https://github.com/opentx/opentx/issues/1817#issuecomment-61386777
+local function drawEllipse(col, row, width, height)
+    local x = width / 2                             -- half width
+    local y = height / 2                            -- half height
+    local center_x = col + x                        -- horizontal center of the ellipse
+    local center_y = row + y                        -- vertical center of the ellipse
+    local sin45 = math.sin(math.pi / 4)             -- Sine of 45°
+    local i, j
+
+-- Plot four cardinal points
+    lcd.drawPoint(col, center_y)
+    lcd.drawPoint(col + width, center_y)
+    lcd.drawPoint(center_x, row)
+    lcd.drawPoint(center_x, row + height)
+
+-- Plot horizontal part of the curve
+    for i = 1, math.floor(x * sin45), 1 do
+        j = math.floor(y * (1 - (i / x) ^ 2) ^ 0.5 + 0.5) -- rounded
+        lcd.drawPoint(center_x + i, center_y + j)
+        lcd.drawPoint(center_x + i, center_y - j)
+        lcd.drawPoint(center_x - i, center_y + j)
+        lcd.drawPoint(center_x - i, center_y - j)
     end
-  end
-  
-  -- Animated Quadcopter propellors
-  if ((isArmed == 0 or isArmed == 2) and invert == false) or (isArmed == 1 and animationIncrementLocal == 0) then
-    -- Top left Propellor
-    lcd.drawLine(start_x + 1, start_y + 9, start_x + 9, start_y + 1, SOLID, FORCE)
-    lcd.drawLine(start_x + 1, start_y + 10, start_x + 8, start_y + 1, SOLID, FORCE)
-  elseif isArmed == 1 and animationIncrementLocal == 1 then
-    -- Top left Propellor
-    lcd.drawLine(start_x, start_y + 5, start_x + 9, start_y + 5, SOLID, FORCE)
-    lcd.drawLine(start_x, start_y + 4, start_x + 9, start_y + 6, SOLID, FORCE)
-  elseif ((isArmed == 0 or isArmed == 2) and invert == true) or (isArmed == 1 and animationIncrementLocal == 2) then
-    -- Top left Propellor
-    lcd.drawLine(start_x + 1, start_y + 1, start_x + 9, start_y + 9, SOLID, FORCE)
-    lcd.drawLine(start_x + 1, start_y + 2, start_x + 10, start_y + 9, SOLID, FORCE)
-  elseif isArmed == 1 and animationIncrementLocal == 3 then
-    -- Top left Propellor
-    lcd.drawLine(start_x + 5, start_y, start_x + 5, start_y + 10, SOLID, FORCE)
-    lcd.drawLine(start_x + 6, start_y, start_x + 4, start_y + 10, SOLID, FORCE)
+
+-- Plot vertical part of the curve
+    for i = 1, j - 1, 1 do
+        j = math.floor(x * (1 - (i / y) ^ 2) ^ 0.5 + 0.5) -- rounded
+        lcd.drawPoint(center_x + j, center_y + i)
+        lcd.drawPoint(center_x + j, center_y - i)
+        lcd.drawPoint(center_x - j, center_y + i)
+        lcd.drawPoint(center_x - j, center_y - i)
+    end
+end
+
+local function drawTriBlade(start_x, start_y, invert)
+  if invert == 0 then
+    -- blade 1
+	lcd.drawLine(start_x + 5, start_y + 5, start_x + 1, start_y + 2, SOLID, FORCE)
+	lcd.drawLine(start_x + 4, start_y + 5, start_x + 1, start_y + 3, SOLID, FORCE)
+	-- blade 2
+	lcd.drawLine(start_x + 5, start_y + 5, start_x + 9, start_y + 2, SOLID, FORCE)
+	lcd.drawLine(start_x + 5, start_y + 4, start_x + 9, start_y + 1, SOLID, FORCE)
+	-- blade 3
+	lcd.drawLine(start_x + 5, start_y + 5, start_x + 5, start_y + 10, SOLID, FORCE)
+	lcd.drawLine(start_x + 6, start_y + 6, start_x + 6, start_y + 10, SOLID, FORCE)
+  elseif invert == 1 then
+	-- blade 1
+	lcd.drawLine(start_x + 5, start_y + 5, start_x + 9, start_y + 8, SOLID, FORCE)
+	lcd.drawLine(start_x + 6, start_y + 5, start_x + 9, start_y + 7, SOLID, FORCE)
+	-- blade 2
+	lcd.drawLine(start_x + 5, start_y + 5, start_x + 1, start_y + 8, SOLID, FORCE)
+	lcd.drawLine(start_x + 5, start_y + 6, start_x + 1, start_y + 9, SOLID, FORCE)
+	-- blade 3
+	lcd.drawLine(start_x + 5, start_y + 5, start_x + 5, start_y, SOLID, FORCE)
+	lcd.drawLine(start_x + 4, start_y + 4, start_x + 4, start_y, SOLID, FORCE)
   end
 end
+
+local function drawPropellor(start_x, start_y, invert)  
+  -- Quadcopter propellors
+  if (isArmed == 0) then
+    -- still blade
+	drawTriBlade(start_x, start_y, invert)
+  elseif isArmed == 1 then
+    -- rotating blade
+    drawEllipse(start_x, start_y, 10, 10)
+    drawEllipse(start_x + 1, start_y + 1, 8, 8)
+  end
+end
+
 
 -- A sexy helper to draw a 30x30 quadcopter (since X7 can not draw bitmap)
 local function drawQuadcopter(start_x,start_y)
@@ -107,13 +148,13 @@ local function drawQuadcopter(start_x,start_y)
   end
   
   -- Top-left propellor
-  drawPropellor(start_x, start_y, false)
+  drawPropellor(start_x, start_y , 0)
   -- Bottom-Right Propellor
-  drawPropellor(start_x + 20, start_y + 20, false)
+  drawPropellor(start_x + 20, start_y + 20, 1)
   -- Top-Right Propellor
-  drawPropellor(start_x + 20, start_y, true)
+  drawPropellor(start_x + 20, start_y, 0)
   -- Bottom-left Propellor
-  drawPropellor(start_x, start_y + 20, true)
+  drawPropellor(start_x, start_y + 20, 1)
   
 end
 
@@ -154,33 +195,13 @@ local function drawTransmitterVoltage(start_x,start_y,voltage)
   end
 end
 
-local function drawFlightTimer(start_x, start_y)
-  local timerWidth = 44
-  local timerHeight = 20
-  local myWidth = 0
-  local percentageLeft = 0
-  
-  lcd.drawRectangle( start_x, start_y, timerWidth, 10 )
-  lcd.drawText( start_x + 2, start_y + 2, "Fly Timer", SMLSIZE )
-  lcd.drawRectangle( start_x, start_y + 10, timerWidth, timerHeight )
-
-  if timerLeft < 0 then
-    lcd.drawRectangle( start_x + 2, start_y + 20, 3, 2 )
-    lcd.drawText( start_x + 2 + 3, start_y + 12, (timerLeft * -1).."s", DBLSIZE + BLINK )
-  else
-    lcd.drawTimer( start_x + 2, start_y + 12, timerLeft, DBLSIZE )
-  end 
-  
-  percentageLeft = (timerLeft / maxTimerValue)
-  local offset = 0
-  while offset < (timerWidth - 2) do
-    if (percentageLeft * (timerWidth - 2)) > offset then
-      -- print("Percent left: "..percentageLeft.." width: "..myWidth.." offset: "..offset.." timerHeight: "..timerHeight)
-      lcd.drawLine( start_x + 1 + offset, start_y + 11, start_x + 1 + offset, start_y + 9 + timerHeight - 1, SOLID, 0)
-    end
-    offset = offset + 1
+local function drawBeeper(start_x,start_y)
+  if animationIncrement < 2  then
+    drawEllipse(start_x, start_y, 40, 40)
+    drawEllipse(start_x + 5, start_y + 5, 30, 30)
+    drawEllipse(start_x + 10, start_y + 10, 20, 20)
+    drawEllipse(start_x + 15, start_y + 15, 10, 10)
   end
-  
 end
 
 local function drawTime()
@@ -202,19 +223,19 @@ local function drawTime()
 end
 
 local function drawRSSI(start_x, start_y)
-  local timerWidth = 44
-  local timerHeight = 15
+  local widgetWidth = 44
+  local widgetHeight = 15
   local myWidth = 0
   local percentageLeft = 0
   
-  lcd.drawRectangle( start_x, start_y, timerWidth, 10 )
+  lcd.drawRectangle( start_x, start_y, widgetWidth, 10 )
   lcd.drawText( start_x + 2, start_y + 2, "RSSI:", SMLSIZE)
   if rssi < 50 then
     lcd.drawText( start_x + 23, start_y + 2, rssi, SMLSIZE + BLINK)
   else
     lcd.drawText( start_x + 23, start_y + 2, rssi, SMLSIZE)
   end
-  lcd.drawRectangle( start_x, start_y + 10, timerWidth, timerHeight )
+  lcd.drawRectangle( start_x, start_y + 10, widgetWidth, widgetHeight )
   
   
   if rssi > 0 then
@@ -337,10 +358,7 @@ local function drawRSSI(start_x, start_y)
 end
 
 local function drawVoltageText(start_x, start_y)
-  -- First, try to get voltage from VFAS...
   local voltage = getValue('VFAS')
-  -- local voltage = getValue('Cels')   -- For miniwhoop seems more accurate
-  -- TODO: if that failed, get voltage from somewhere else from my bigger quads?  Or rebind the voltage to VFAS?
   
   if tonumber(voltage) >= 10 then
     lcd.drawText(start_x,start_y,string.format("%.2f", voltage),MIDSIZE)
@@ -353,7 +371,7 @@ end
 local function drawVoltageImage(start_x, start_y)
   
   -- Define the battery width (so we can adjust it later)
-  local batteryWidth = 12 
+  local batteryWidth = 16
 
   -- Draw our battery outline
   lcd.drawLine(start_x + 2, start_y + 1, start_x + batteryWidth - 2, start_y + 1, SOLID, 0)
@@ -378,16 +396,16 @@ local function drawVoltageImage(start_x, start_y)
   lcd.drawLine(start_x + batteryWidth - math.ceil(batteryWidth / 4), start_y + 44, start_x + batteryWidth - 1, start_y + 44, SOLID, 0)
   
   -- Voltage top
-  lcd.drawText(start_x + batteryWidth + 4, start_y + 0, "4.35v", SMLSIZE)
+  lcd.drawText(start_x + batteryWidth + 4, start_y + 0, "4.2v", SMLSIZE)
   -- Voltage middle
-  lcd.drawText(start_x + batteryWidth + 4, start_y + 24, "3.82v", SMLSIZE)
+  lcd.drawText(start_x + batteryWidth + 4, start_y + 24, "3.8v", SMLSIZE)
   -- Voltage bottom
   lcd.drawText(start_x + batteryWidth + 4, start_y + 47, "3.3v", SMLSIZE)
   
   -- Now draw how full our voltage is...
-  local voltage = getValue('VFAS')
+  local voltage = getValue('A4')
   voltageLow = 3.3
-  voltageHigh = 4.35
+  voltageHigh = 4.2
   voltageIncrement = ((voltageHigh - voltageLow) / 47)
   
   local offset = 0  -- Start from the bottom up
@@ -399,26 +417,58 @@ local function drawVoltageImage(start_x, start_y)
   end
 end
 
+local function drawCurrent(start_x, start_y)
+  lcd.drawLine(start_x + 2, start_y + 0, start_x + 7, start_y + 0, SOLID, FORCE)
+  lcd.drawLine(start_x + 2, start_y + 0, start_x + 0, start_y + 5, SOLID, FORCE)
+  lcd.drawLine(start_x + 0, start_y + 5, start_x + 2, start_y + 5, SOLID, FORCE)
+  lcd.drawLine(start_x + 2, start_y + 5, start_x + 0, start_y + 10, SOLID, FORCE)
+  lcd.drawLine(start_x + 1, start_y + 10, start_x + 7, start_y + 4, SOLID, FORCE)
+  lcd.drawLine(start_x + 7, start_y + 3, start_x + 5, start_y + 3, SOLID, FORCE)
+  lcd.drawLine(start_x + 7, start_y + 1, start_x + 5, start_y + 3, SOLID, FORCE)
+  local current = getValue('Curr')
+  maxCurrent = math.max(maxCurrent, tonumber(current))
+  lcd.drawText(start_x + 8, start_y + 3, string.format("%.1f", current), SMLSIZE)
+  lcd.drawLine(start_x + 26, start_y + 1, start_x + 26, start_y + 10, SOLID, FORCE)
+  lcd.drawText(start_x + 28, start_y + 3, string.format("%.1f", maxCurrent), SMLSIZE)
+end
+
+local function drawMAH(start_x, start_y)
+  lcd.drawLine(start_x + 3, start_y + 0, start_x + 5, start_y + 0, SOLID, FORCE)
+  lcd.drawLine(start_x + 1, start_y + 1, start_x + 7, start_y + 1, SOLID, FORCE)
+  lcd.drawLine(start_x + 1, start_y + 1, start_x + 1, start_y + 11, SOLID, FORCE)
+  lcd.drawLine(start_x + 7, start_y + 1, start_x + 7, start_y + 11, SOLID, FORCE)
+  lcd.drawLine(start_x + 1, start_y + 11, start_x + 7, start_y + 11, SOLID, FORCE)
+  lcd.drawLine(start_x + 3, start_y + 3, start_x + 5, start_y + 3, SOLID, FORCE)
+  lcd.drawLine(start_x + 3, start_y + 5, start_x + 5, start_y + 5, SOLID, FORCE)
+  lcd.drawLine(start_x + 3, start_y + 7, start_x + 5, start_y + 7, SOLID, FORCE)
+  lcd.drawLine(start_x + 3, start_y + 9, start_x + 5, start_y + 9, SOLID, FORCE)
+  local mah = getValue('Fuel')
+  if tonumber(mah) == 0 then
+    previousMAH = drawnMAH
+  end
+  drawnMAH = tonumber(mah) + previousMAH
+  lcd.drawText(start_x + 9, start_y + 3, drawnMAH, SMLSIZE)
+  lcd.drawLine(start_x + 27, start_y + 1, start_x + 27, start_y + 10, SOLID, FORCE)
+  lcd.drawText(start_x + 29, start_y + 3, mah, SMLSIZE)
+end
+
 local function gatherInput(event)
   
   -- Get our RSSI
   rssi = getRSSI()
 
-  -- Get the seconds left in our timer
-  timerLeft = getValue('timer1')
-  -- And set our max timer if it's bigger than our current max timer
-  if timerLeft > maxTimerValue then
-    maxTimerValue = timerLeft
-  end
-
   -- Get our current transmitter voltage
   currentVoltage = getValue('tx-voltage')
 
-  -- Armed / Disarm / Buzzer switch
-  armed = getValue('sa')
+  -- Armed / Disarm
+  armed = getValue(armSwitch)
 
   -- Our "mode" switch
-  mode = getValue('sb')
+  mode = getValue(modeSwitch)
+  mode2 = getValue(modeSwitch2)
+  
+  -- Beeper switch
+  beeper = getValue(beeperSwitch)
 
   -- Do some event handling to figure out what button(s) were pressed  :)
   if event > 0 then
@@ -439,9 +489,10 @@ local function gatherInput(event)
   end
 
   if event == 96 then
-    lastMessage = "Menu Button Pressed"
+    lastMessage = "Menu Button Pressed. Reseting values"
     killEvents(96)
-  end
+    resetValues()
+  end  
   
   if event == EVT_ROT_RIGHT then
     lastMessage = "Navigate Right Pressed"
@@ -458,15 +509,16 @@ local function gatherInput(event)
 
 end
 
-
 local function getModeText()
   local modeText = "Unknown"
   if mode < -512 then
-    modeText = "Air Mode"
+    modeText = "Angle"
   elseif mode > -100 and mode < 100 then
-    modeText = "Acro"
-  elseif mode > 512 then
     modeText = "Horizon"
+  elseif mode > 512 and mode2 < -100 then
+    modeText = "Trainer"
+  elseif mode > 512 and mode2 > -100 then
+    modeText = "Acro"
   end
   return modeText
 end
@@ -504,14 +556,22 @@ local function run(event)
   -- Draw our sexy quadcopter animated (if armed) from scratch
   drawQuadcopter(47, 16)
   
+  -- Draw Beeper
+  if beeper > 0 then
+    drawBeeper(42, 11)
+  end
+  
   -- Draw our sexy voltage
   drawTransmitterVoltage(0,0, currentVoltage)
-
-  -- Draw our flight timer
-  drawFlightTimer(84, 34)
   
   -- Draw RSSI
   drawRSSI(84, 8)
+  
+  -- Draw Current
+  drawCurrent(84, 35)
+  
+  -- Draw mAh usage
+  drawMAH(83, 48)
   
   -- Draw Time in Top Right
   drawTime()
@@ -525,7 +585,6 @@ local function run(event)
   return 0
 end
 
-
 local function init_func()
   -- Called once when model is loaded, only need to get model name once...
   local modeldata = model.getInfo()
@@ -533,6 +592,5 @@ local function init_func()
     modelName = modeldata['name']
   end
 end
-
 
 return { run=run, init=init_func  }
